@@ -1,0 +1,454 @@
+---
+title: "Neuromyelitis Optica Spectrum Disorders"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    theme: spacelab
+    toc: true
+    number_sections: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=F, warning=F, message=F, error=F}
+#1. Installing packages
+#install.packages("data.table")
+#install.packages("ggplot2")
+#install.packages("cowplot")
+#install.packages("RColorBrewer")
+#install.packages("survival") 
+#install.packages("KMsurv")
+#install.packages('survminer')
+
+#2. Attaching packages
+library(data.table)
+library(ggplot2)
+library(cowplot)
+library(gridExtra)
+library(grid)
+library(RColorBrewer)
+library(scales)
+
+library(survival)
+library(KMsurv)
+library(survminer)
+
+library(knitr)
+library(pander)
+
+rm(list=ls())
+
+#Importing function for sharing legend 
+source("C:/Users/RamilHakim/Dropbox/PHD/PAPER I/R_v2/Function_directory/get_legend.R")
+source("C:/Users/RamilHakim/Dropbox/PHD/PAPER I/R_v2/Function_directory/blank_theme.R")
+```
+
+#Executive Summary
+
+**1.** The incidence rate has increased steadily from 1991 to 2013    
+**2.** The typical patient is a 40-year old female  
+**3.** Time from onset to diagnosis is approximately 1 year  
+**4.** CSF analysis is associated with a high degree of false negative results  
+**5.** Relapses occur in 3 out of 4 patients.     
+**6.** Relapses are mainly treated with steroids  
+**7.** Mortality is low and in all (three) cases due to infection
+
+***
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Importing data
+DT = fread("NMO_NOpatID_clean_v2.csv", na.strings=c("#VALUE!", NA, "#NUM!", "utan diagnos", "oklart datum",  "x", "X", ""))
+#2. Defining variables
+#Factor
+factor_vars <- names(DT)[c(unlist(lapply(list("relapse", "symptom", "csf", "MRI", "inhibit"), function(element){grep(element, names(DT))})), which(names(DT) %in% c("sex.male", "relapsing.binary", "episode2.first.optic.neuritis")))]
+DT[, factor_vars] <- DT[,lapply(.SD, factor), .SDcols = factor_vars]
+DT[,"sex.male"] <- factor(DT[,sex.male], levels=c(0,1), labels=c("female", "male"))
+#Date
+date_vars <- names(DT)[grep("date", names(DT))]
+DT[,date_vars] <- DT[,lapply(.SD, function(variable){as.Date(variable, format='%Y-%m-%d')}), .SDcols=date_vars]
+#Numeric
+numeric_cols <- c("presentation.age", 'presentation.to.diagnose.time.months', "episode2.time.presentation.to.episode2")
+DT[,numeric_cols] <- DT[,lapply(.SD, function(variable){as.integer(gsub(",",".", variable))}), .SDcols = numeric_cols]
+DT[, "ab.NMO"] <- DT[, .(ab.NMO=tolower(ab.NMO))][, ifelse(ab.NMO=="neg", "neg", "pos")]
+```
+
+#Data
+
+**Table 1. Current data**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=5}
+descriptive_table <- data.table(Descriptive = c("Patients (n)", "Mean follow up time (years)"), Value = t(DT[,.(no.of.pat = .N, mean.follow.up.time.years = round(mean(follow.up.months)/12))]))
+names(descriptive_table) <- c(" ", " ")
+
+####SECTION OUTPUT
+pander(descriptive_table, justify = c("left", "center"))
+```
+
+***
+
+#Incidence Rate
+
+**Fig 1. Incidence rate in Sweden (1975-2013)**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5}
+#1. Importing the population count per year from 1960-2016
+DT_swe_population <- fread('population_swe_count_csv.csv')
+DT_swe_population[,"year"] <- factor(DT_swe_population[,year])
+#2. Finding the frequency of nmo presentation per year
+new_nmo_per_year <- data.table(ftable(as.integer(format(DT[,presentation.date],'%Y'))))
+names(new_nmo_per_year) <- c("year", "n")
+new_nmo_per_year[,"year"] <- factor(new_nmo_per_year[,year])
+#3. Merging the dataset
+DT_incidens <- merge(new_nmo_per_year, DT_swe_population, by="year")
+names(DT_incidens) <- c("year", "nmo", "swe.pop")
+DT_incidens[, "year"]  <- as.integer(as.character(DT_incidens[,year]))
+#4. Calculating the incidens ratio per 100.000 individuals
+DT_incidens <- DT_incidens[,incidens.ratio := nmo/(swe.pop/100000)]
+#5. Plotting the incidens ratio over time
+incidens_plot <- ggplot(DT_incidens[year>1987], aes(x=year, y=incidens.ratio))+
+  geom_smooth(inherit.aes = T, method="loess", linetype=2, size=2, color="black")+
+  geom_point(size=7, color=brewer.pal(11, "RdBu")[11], alpha=0.9)+
+  geom_smooth(DT_incidens[year>=1991], mapping=aes(x=year, y=incidens.ratio), method="lm", se=F, color=brewer.pal(11, "RdBu")[1], size=2)+
+
+  xlab("Year")+
+  ylab("Incidence rate (per 100.000 individuals)")+
+  
+  theme(axis.title = element_text(size=14, face="bold"))+
+  scale_x_continuous(breaks=seq(1990,2013,2))+
+  scale_y_continuous(breaks=seq(0, 0.12, 0.02))+
+  
+  annotate("text", x=2001.5, y=0.08, label=paste("ROC:\n", toString(format(lm(incidens.ratio ~year, data = DT_incidens[year>=1991])$coefficients[2], scientific = T, digits=2))), fontface=2, size=5)
+
+####SECTION OUTPUT
+incidens_plot
+```
+
+**Fig 1.** _Figure reports the incidence rate per 100.000 individuals in Sweden from 1975 to 2013. Incidence rate is defined as = number of NMO presentations per year divided with the population size for the same year. Population size data is exported from Statistics Sweden (_ [Statistiska centralbyrån](http://www.statistikdatabasen.scb.se/pxweb/sv/ssd/START__BE__BE0101__BE0101A/BefolkningNy/?rxid=58b124ea-ca7e-4564-ac01-14aaa1ac8819) _). The rate of change was slightly negative (in reality zero) between 1975 and 1990 and has been positive from 1991 to 2013. It is important to scrutinize the documentation, detection and availability of the data prior to 1990. Given that the quality of the data is homogenous for all years, the incidence rate has and perhaps still is increasing. (ROC: Rate Of Change)_
+
+***
+
+#Disease at Onset
+
+##Age & sex 
+
+**Fig 2. Age and sex distribution at onset**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5}
+#1. Plot of age distribution divided by sex 
+age_plot <- ggplot(DT, aes(x = presentation.age, fill = sex.male))+
+  geom_histogram(bins=13, alpha=0.6, position = 'identity')+
+  
+  ylab("Count (n)")+
+  xlab("Age (years)")+
+  
+  scale_fill_manual(values=brewer.pal(11, "RdBu")[c(1,2)], labels=c("Female", "Male"))+
+  scale_x_continuous(breaks=seq(0,80,10))+
+  scale_y_continuous(breaks=seq(0,16,2))+
+  theme(axis.title = element_text(size=17, face="bold"), legend.title = element_blank(), legend.position = "bottom", legend.justification = "center")
+
+pie_chart_plot_function <- function(data.set, variable, colorscheme, fig.type=NULL, group.names){
+  table_data <- data.frame(table(data.set[, get(variable)]))
+  prop_table_data <- as.data.frame.table(prop.table(table(data.set[, get(variable)])))
+  
+  names(table_data) <- c("group", "value")
+  table_data[,"group"] <- group.names
+  table_data <- table_data[order(table_data$value),]
+
+  plot_out <- ggplot(table_data, aes(x="", y=value))+
+  geom_bar(aes(fill=group),width = 1, stat = "identity", alpha=0.6)+
+  coord_polar("y", start=0)+
+  
+  scale_fill_manual(values=colorscheme)+ 
+  blank_theme +
+  theme(axis.text.x=element_blank(), legend.position = "none")+
+  geom_text(prop_table_data, mapping =aes(y = c(15,70)), 
+                label = (c(paste("Female",round(prop_table_data[1,"Freq"],2)*100, "%"), paste("Male",round(prop_table_data[2,"Freq"],2)*100, "%"))), size=5, fontface=2)+
+  
+  annotate("text", x=0.01, y=2, label=" ", size=7.5, fontface=2)
+  
+  return(plot_out)  
+}
+
+
+
+grid.arrange(arrangeGrob(age_plot, left=textGrob("A", gp=gpar(fontsize=17, fontface="bold"), vjust=-16)), arrangeGrob(pie_chart_plot_function(DT, "sex.male", brewer.pal(11, "RdBu")[c(9,11)], "B", c("Female", "Male")), left=textGrob("B", gp=gpar(fontsize=17, fontface="bold"), vjust = -16)), ncol=2, nrow=1)
+```
+
+**Fig 2. ** _Figure 2A reports the age distribution in the patient cohort for each sex. Both sexes have bell-shaped histograms with mean at 40 years of age. Hence, this patient cohort has, in this aspect, similarites with previously published data. Fig 2B reports the sex distribution in the dataset, which is also in line with previously published data._
+
+**Table 2. Descriptive statistics: age at onset**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Defining summary function for genral use
+summary_function <- function(data.set, variable){
+  out <- kable(format(data.set[,.(patients = .N, mean = mean(get(variable), na.rm=T), sd = sd(get(variable), na.rm=T), median = median(get(variable), na.rm=T), q25 = quantile(get(variable), na.rm=T, .25), q75 = quantile(get(variable), na.rm=T, .75))][,!"patients"], digits=2), align="c", col.names = c("Mean", "SD",  "Median", "Q25", "Q75"))
+  
+  return(out) 
+}
+
+#2. Descriptive statistics for age and sex 
+summary_function(DT, "presentation.age")
+```
+
+##Clinical features
+
+**Fig 3. Clinical features of patients (regardless of timing)**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=7}
+#1. Retrieving the original symptom variables & creating a new dataset
+symptom_vars <- grep("symptom", names(DT))
+DT_symptom <- DT[,..symptom_vars]
+#2. Chaning column names to simpler version
+names(DT_symptom) <- gsub("symptom.","", names(DT_symptom))
+#3. Changing variable type to integer for calcuation purposes
+DT_symptom <- DT_symptom[,lapply(.SD, function(column){as.integer(as.character(column))}), .SDcols=names(DT_symptom)]
+#4. Calculating interepts between symptoms
+DT_symptom <- DT_symptom[,`:=`(optic.transverse = optic.neuritis + transverse.myelitis, optic.bulbar = optic.neuritis + bulbar, transverse.bulbar = transverse.myelitis + bulbar)]
+#5. Changing back to character to be able to use the switch function
+DT_symptom <- DT_symptom[,lapply(.SD, function(column){as.character(column)}), .SDcols=names(DT_symptom)]
+#6. Using switch to convert values to boolean and NA (when applicable)
+DT_symptom <- data.table(apply(DT_symptom[,1:3], c(1,2), function(element){switch(element, "NA"=NA, "1"=TRUE, "0"=FALSE)}),
+           apply(DT_symptom[,4:length(DT_symptom)], c(1,2), function(element){switch(element, "NA"=NA, "2"=TRUE, "1"=FALSE, "0"=FALSE)}))
+#7. Calculating the proportion of TRUE of all observations per column which are not NA (i.e. TRUE+FALSE)
+symptom_summary_function <- function(column){round(sum(column, na.rm=T)/sum(!is.na(column)),2)*100}
+DT_symptom_summary <- data.table(do.call(cbind,lapply(DT_symptom, function(column){symptom_summary_function(column)})))
+DT_symptom_summary <- suppressWarnings(melt(DT_symptom_summary))
+DT_symptom_summary <- DT_symptom_summary[order(-value)]
+DT_symptom_summary[,"variable"] <- factor(DT_symptom_summary[,variable], levels = unique(DT_symptom_summary[,variable]))
+#8. Plotting symptom distribution
+symptom_plot <- ggplot(DT_symptom_summary, aes(x=variable, y=value, fill=variable))+
+  geom_bar(stat='identity',alpha=0.8, width=0.8, show.legend = F)+
+  geom_text(aes(label=paste(value, "%")), vjust=-1, fontface=2, size=5)+
+  
+  scale_y_continuous(breaks = seq(0,100,10))+
+  scale_x_discrete(labels=c("Transverse myelitis", "Optic neuritis", "Optic neuritis & transverse myelitis", "Bulbar", "Transverse myelitis & bulbar", "Optic neuritis & bulbar"))+
+  scale_fill_manual(values=brewer.pal(11, "RdBu")[c(1,2,3,9,10,11)])+
+  
+  xlab("Clinical feature")+
+  ylab("Percentage of patients (%)")+
+  
+  theme(axis.title = element_text(size=17, face="bold"), axis.text.x = element_text(size=10, face="bold"))
+
+####SECTION OUTPUT
+symptom_plot
+```
+
+**Fig 3.** _Figure reports the clinical features of patients regardless of timing._
+
+**Table 3. Number of patients with a particular symptom divided by type of NMO**
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Symptom split
+symptom_split <- rbind(do.call(cbind,lapply(list(0,1,2),function(relapse.type){DT[relapsing.binary==1, sum(episode2.first.optic.neuritis==relapse.type, na.rm=T)]})),cbind(DT[relapsing.binary==0, sum(symptom.transverse.myelitis==1, na.rm=T)], DT[relapsing.binary==0, sum(symptom.optic.neuritis==1, na.rm=T)], DT[relapsing.binary==0, sum(symptom.optic.neuritis==1 & symptom.transverse.myelitis==1 , na.rm=T)]))
+
+symptom_split <- data.table(type=c("Relapsing", "Non-relapsing"),symptom_split)
+names(symptom_split) <- c("Type","Transverse Myelitis", "Optic Neuritis", "Transverse Myelitis & Optic Neuritis")
+
+#####SECTION OUTPUT
+kable(symptom_split, align=c("l", rep("c",3)))
+```
+
+**Comment: ** _Data for relapsing type refers to the number of patients who presented with the particular symptom. Data for the non-relapsing type refers to data for patients who had the particular symptom (combinations of symptoms is not taken into consideration)._
+
+##Time from onset to diagnosis
+  
+**Fig 4. Time from onset to diagnosis**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5}
+#1. Time from presentation to diagnosis: histogram
+time_histogram <- ggplot(DT, aes(x=presentation.to.diagnose.time.months))+
+  geom_histogram(bins=14, fill=brewer.pal(11, "RdBu")[10], alpha=0.8)+
+  
+  ylab("Count (n)")+
+  
+  scale_x_continuous(breaks=seq(0,600,50))+
+  scale_y_continuous(breaks=seq(0,60,5))+
+  theme(axis.title.y = element_text(size=17, face="bold"), axis.title.x = element_blank())
+  
+#2. Time from presentation to diagnosis: boxplot
+time_boxplot <- ggplot(DT, aes(x=1, y=presentation.to.diagnose.time.months))+
+  geom_boxplot(fill=brewer.pal(11, "RdBu")[2], alpha=0.8)+
+  coord_flip()+
+  
+  scale_y_continuous(breaks=seq(0,600,50))+
+  scale_x_discrete()+
+  theme(axis.title = element_blank())
+
+####SECTION OUTPUT
+grid.arrange(arrangeGrob(time_histogram, left = textGrob("A", gp=gpar(fontsize=17, fontface="bold"), vjust = -12)), arrangeGrob(time_boxplot, left=textGrob("B", gp=gpar(fontsize=17, fontface="bold"), vjust=-12)), bottom=textGrob("Time from onset to diagnosis (months)", gp=gpar(fontsize=17, fontface="bold")), ncol=2, nrow=1)
+```
+
+**Fig 4.** _Figure 2A reports the distribution of the time from presentation to diagnosis. Figure 2B presents a boxplot of the distribution of the time from presentation to diagnosis. The distribution has a positive skew suggesting that the time from presentation to diagnosis is not evenly distributed and that the majority of patients are diagnosed early rather than late. The boxplot (and table 1 below) confirm that the data has a tail but is centered on the lower range of the time axis._
+
+**Table 4. Descriptive statistics: time from onset to diagnosis**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Time from presentation to diagnosis: descriptive statistics  
+summary_function(DT, "presentation.to.diagnose.time.months")
+```
+
+***
+
+##Cerebrospinal fluid diagnostical examination
+
+**Fig 5. Fraction of true positive and false negative examinations in the cerebrospinal fluid**
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=6}
+#1.Diagnositical accuracy
+blank_theme <- theme_minimal()+
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.grid=element_blank(),
+  axis.ticks = element_blank(),
+  plot.title=element_text(size=14, face="bold")
+  )
+
+pie_chart_plot_function <- function(data.set, variable, colorscheme, fig.type, group.names){
+  data.set <- data.frame(table(data.set[, get(variable)]))
+  names(data.set) <- c("group", "value")
+  data.set[,"group"] <- group.names
+  data.set <- data.set[order(data.set$value),]
+ 
+  plot_out <- ggplot(data.set, aes(x="", y=value, fill=group))+
+  geom_bar(width = 1, stat = "identity", alpha=0.6)+
+  coord_polar("y", start=0)+
+  
+  scale_fill_manual(values=colorscheme)+ 
+  blank_theme +
+  theme(axis.text.x=element_blank(), legend.position = "none")+
+  geom_text(aes(y = value/2 + c(0, cumsum(value)[-length(value)]), 
+                label = paste(group, percent(value/sum(value))), size=5, fontface=2))+
+  
+  annotate("text", x=0.01, y=2, label=fig.type, size=7.5, fontface=2) 
+  return(plot_out)  
+}
+
+pie_chart_cells <- pie_chart_plot_function(DT[!is.na(csf.cells)], "csf.cells", brewer.pal(11, "RdBu")[c(10,11)], "A", c("No cells\n", "Cells>5\n"))
+pie_chart_bands <- pie_chart_plot_function(DT[!is.na(csf.oligoclonal.band)], "csf.oligoclonal.band", brewer.pal(11, "RdBu")[c(1,2)], "B", c("No oligoclonal\nband", "Oligoclonal\nBand"))
+
+####SECTION OUTPUT
+grid.arrange(arrangeGrob(pie_chart_cells, left=textGrob("A", gp=gpar(fontsize=17, fontface="bold"), vjust=-16)), arrangeGrob(pie_chart_bands, left=textGrob("B", gp=gpar(fontsize=17, fontface="bold"), vjust=-16)), ncol=2, nrow=1)
+```
+
+**Fig 5.** _Figure reports the fraction of true positive (cells, band) and false negative (no cells, no band) for two types of examinations of the  cerebrospinal fluid (CSF). Figure 3A reports cell detection while Figure 3B reports detection of oligoclonal bands. The fraction of false negative tests for both examinations are substantial._
+
+#Inhibitory Drug Treatment
+
+**Fig 6. Inhibitory drugs**
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=6}
+#1. Subsetting relapse treatment data
+relapse_treat <- names(DT)[grep("relapse.treatment", names(DT))]
+DT_relapse_treat <- DT[,..relapse_treat]
+#2. Changing data type to integer
+DT_relapse_treat <- data.table(do.call(cbind,lapply(DT_relapse_treat,function(column){as.integer(as.character(column))})))
+#3. Calculating summary statistics (proportion treated with each respective treatment)
+DT_relapse_treat_summary <- do.call(rbind,lapply(DT_relapse_treat, function(column){round(prop.table(table(column)),2)}))
+DT_relapse_treat_summary <- data.table(Treatment=c("Steroids", "IVIG", "Plasmapheresis"), DT_relapse_treat_summary)
+DT_relapse_treat_summary <- melt(DT_relapse_treat_summary, id.vars = "Treatment")
+#4. Plotting relapse treatment distribution
+treatment_plot_function <- function(data.set, colors){
+  
+  treatment_plot <- ggplot(data.set, aes(x=Treatment, fill=variable, y=value))+
+  geom_bar(stat="identity", alpha=0.8)+
+  geom_text(data.set[variable==1],mapping=aes(y=value/2, x=Treatment, label=paste(value*100, "%")), fontface=2, size=5)+
+  
+  xlab("Treatment")+
+  ylab("Percentage (%)")+
+    
+  scale_fill_manual(values=colors, labels=c("No", "Yes"), name="")+
+  scale_y_continuous(breaks=seq(0,1,0.1), labels = seq(0,100,10), limits=c(0,1.1))+
+  
+  theme(axis.title = element_text(size=17, face="bold"), axis.text.x = element_text(size=12, face="bold"))
+
+  return(treatment_plot)
+  
+}
+
+#5. Inhibition treatment subset
+inhibit_treat <- names(DT)[grep("inhibit", names(DT))]
+DT_inhibit_treatment <- DT[, ..inhibit_treat][,!"inhibit.drug.other"]
+DT_inhibit_treatment <- data.table(do.call(cbind, lapply(DT_inhibit_treatment, function(column){as.integer(as.character(column))})))
+DT_inhibit_treatment_summary <- data.table(Treatment=c("Interferon", "Tysabri", "Gilenya", "Azathioprine", "Mabthera"), do.call(rbind, lapply(DT_inhibit_treatment, function(column){round(prop.table(table(column)),2)})))
+
+DT_inhibit_treatment_summary <- melt(DT_inhibit_treatment_summary, id.vars="Treatment")
+DT_inhibit_treatment_summary <- DT_inhibit_treatment_summary[order(value)]
+DT_inhibit_treatment_summary[,"Treatment"] <- factor(DT_inhibit_treatment_summary[,Treatment], levels=unique(DT_inhibit_treatment_summary[,Treatment]))
+
+treatment_plot_function(DT_inhibit_treatment_summary, c("#000000", brewer.pal(11, "RdBu")[c(10)]))
+```
+
+**Fig 6.** _Figure reports the inhibitory treatment administrated to the patient cohort. Tysabri and Gilenya was basically not administrated at all while Mabthera and Azathioprine were given to between 1/3 and 1/2 of the patient cohort. Mabthera and Azathioprine are more appropriate for use against Multiple Sclerosis (MS) and are unsuitable for NMO patients._
+
+**Table 5. Comorbidites**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Summarizing comorbidities
+comorbidities_list <- list("RA", "ypo", "pso", "arc")
+comorbidities_data <- data.table(Comorbidity = c("RA", "Hypothyreosis", "Psoriasis", "Sarcoidosis"), Count = do.call(rbind, lapply(comorbidities_list, function(comorbidity){length(grep(comorbidity, DT[, comorbidity.autoimmune]))})))
+
+comorbidities_data <- comorbidities_data[,percentage:=round(Count.V1/nrow(DT),3)]
+
+####SECTION OUTPUT
+kable(comorbidities_data, align=c("l", "c", "c"), col.names=c("Comorbidity", "Count (n)", "Percentage of cohort"))
+```
+
+#Relapse
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1.Relapse frequency
+relapse_data <- as.integer(as.character(DT[, relapsing.binary]))
+
+pander(data.table(" "="Relapse", "Percentage (%)"=(sum(relapse_data==1, na.rm=T) / sum(!is.na(relapse_data)))*100), justify=c("left", "center"))
+```
+
+##Relapse drug treatment
+
+**Fig 10. Distribution of drugs administrated during relpase**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5}
+treatment_plot_function(DT_relapse_treat_summary, c("#000000", brewer.pal(11, "RdBu")[c(2)]))
+```
+
+**Fig 10.** _Figure reports the usage of drugs administrated during relapse of NMO. Steroids are most commonly used._
+
+#Outcome
+
+**Table 7. Mortality**
+```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+#1. Mortality
+mortality_table <- data.table(round(prop.table(table(as.integer(DT[dead !="ATH", dead]))),2)*100)
+mortality_table[,"V1"] <- c("Alive", "Dead")
+kable(mortality_table, col.names = c("Status", "(%)"), align=c("l", "c"))
+```
+
+**Comment:** _All three cases of death were caused by infection (sepsis or pneumonia)._
+
+***
+
+#Bibliography
+**[1]** _R Core Team (2016). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. URL htts://www.R-project._
+
+**[2]** _Matt Dowle and Arun Srinivasan (2017). data.table: Extension of `data.frame`. R package version 1.10.4.https://CRAN.R-project.org/package=data.table._
+
+***
+
+#Setup
+
+```{r echo=TRUE, error=FALSE, warning=FALSE, message=FALSE}
+sessionInfo()
+```
+
+```{r echo=TRUE, error=FALSE, warning=FALSE, message=FALSE}
+# #Saving
+# ggsave("incidens_plot.jpg", incidens_plot, width=14, height=7, dpi=1000)
+# ggsave("age_plot.jpg", age_plot, width=14, height=7, dpi=1000)
+# ggsave("pie_chart_plot_function.jpg", pie_chart_plot_function, width=7, height = 7, dpi=1000)
+# ggsave("symptom_plot.jpg", symptom_plot, width=14, height = 7, dpi=1000)
+# ggsave("time_histogram.jpg", time_histogram, width=14, height = 7, dpi=1000)
+# ggsave("time_boxplot.jpg", time_boxplot, width=14, height = 7, dpi=1000)
+# ggsave("pie_chart_cells.jpg", pie_chart_cells, width=7, height = 7, dpi=1000)
+# ggsave("pie_chart_bands.jpg", pie_chart_bands, width=7, height = 7, dpi=1000)
+# ggsave("inhibitory_treatment.jpg", treatment_plot_function(DT_inhibit_treatment_summary, c("#000000", brewer.pal(11, "RdBu")[c(10)])), width=14, heigh=7, dpi=1000)
+# ggsave("relapse_treatment.jpg", treatment_plot_function(DT_relapse_treat_summary, c("#000000", brewer.pal(11, "RdBu")[c(2)])), width=14, height = 7, dpi=1000)
+
+```
+
