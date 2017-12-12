@@ -63,6 +63,7 @@ source("C:/Users/RamilHakim/Dropbox/PHD/PAPER I/R_v2/Function_directory/blank_th
 ```{r echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
 #1. Importing data
 DT = fread("NMO_NOpatID_clean_v2.csv", na.strings=c("#VALUE!", NA, "#NUM!", "utan diagnos", "oklart datum",  "x", "X", ""))
+
 #2. Defining variables
 #Factor
 factor_vars <- names(DT)[c(unlist(lapply(list("relapse", "symptom", "csf", "MRI", "inhibit"), function(element){grep(element, names(DT))})), which(names(DT) %in% c("sex.male", "relapsing.binary", "episode2.first.optic.neuritis")))]
